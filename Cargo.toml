@@ -1,0 +1,40 @@
+[package]
+name = "murmur"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "murmur"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["multipart", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
+
+whisper-rs = "0.16"
+sherpa-onnx = "1.13"
+
+symphonia = { version = "0.5", features = ["mp3", "aac", "alac", "flac", "ogg", "wav", "isomp4"] }
+rubato = "0.15"
+open = "5"
+reqwest = { version = "0.12", features = ["stream", "rustls-tls-webpki-roots"], default-features = false }
+tar = "0.4"
+bzip2 = "0.4"
+flate2 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-24"] }
+ndarray = "0.17"
