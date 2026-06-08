@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
@@ -93,9 +94,11 @@ pub async fn ensure_models(models_dir: &Path) -> anyhow::Result<()> {
     println!(" Downloading required models…");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    let client = reqwest::Client::builder()
-        .user_agent("murmur/1.0")
-        .build()?;
+    // Use Schannel on Windows rather than ring's TLS assembly.
+    #[cfg(windows)]
+    let client = reqwest::Client::builder().user_agent("murmur/1.0").use_native_tls().build()?;
+    #[cfg(not(windows))]
+    let client = reqwest::Client::builder().user_agent("murmur/1.0").build()?;
 
     for dl in &downloads {
         let name = dl.dest.file_name().unwrap_or_default().to_string_lossy();
@@ -147,11 +150,11 @@ async fn stream_to_file(client: &reqwest::Client, url: &str, dest: &Path) -> any
         file.write_all(&chunk).await?;
         downloaded += chunk.len() as u64;
         if let Some(t) = total {
-            print!("\r   {:.1} / {:.1} MB", mb(downloaded), mb(t));
-            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let _ = write!(std::io::stdout(), "\r   {:.1} / {:.1} MB", mb(downloaded), mb(t));
+            let _ = std::io::stdout().flush();
         }
     }
-    println!();
+    let _ = writeln!(std::io::stdout());
     file.flush().await?;
     drop(file);
     tokio::fs::rename(&tmp, dest).await?;

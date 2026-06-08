@@ -32,19 +32,38 @@ pub struct AppState {
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // Worker subprocess: short-circuit before any UI/setup.
     if std::env::args().nth(1).as_deref() == Some("--worker") {
         worker::run_worker();
         return;
     }
 
-    if let Err(e) = run().await {
-        // Print the full error chain so the user can see what went wrong.
+    // Single-thread runtime: eliminates background IOCP worker threads that
+    // crash silently on Windows (mio 1.x / STATUS_ACCESS_VIOLATION).
+    // Fine for a local single-user app.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+
+    if let Err(e) = rt.block_on(run()) {
+        let msg = format!("Failed to start: {e:#}");
         eprintln!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        eprintln!(" Failed to start: {e:#}");
+        eprintln!(" {msg}");
         eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        // Write to a log file so the error is visible even if the console
+        // window closes before the user can read it (common on Windows
+        // when launching via double-click).
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let log = dir.join("murmur-error.log");
+                let _ = std::fs::write(&log, format!("{msg}\n"));
+                eprintln!("\n(details written to {})", log.display());
+            }
+        }
+
         eprintln!("\nPress Enter to close...");
         let _ = std::io::stdin().read_line(&mut String::new());
         std::process::exit(1);
