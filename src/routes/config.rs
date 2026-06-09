@@ -5,12 +5,14 @@ use serde_json::{json, Value};
 use crate::AppState;
 
 pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
-    let available_models = discover_models(&state.models_dir);
-    let diarize_available = crate::diarize::models_available(&state.models_dir); // only needs emb model now
+    let available_models   = discover_models(&state.models_dir);
+    let diarize_available  = crate::diarize::models_available(&state.models_dir);
+    let summarize_available = crate::summarize::available(&state.models_dir);
 
     Json(json!({
         "whisper_available": true,
         "sherpa_diarize_available": diarize_available,
+        "summarize_available": summarize_available,
         "available_models": available_models,
     }))
 }

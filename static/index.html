@@ -178,6 +178,69 @@
     width: 100px;
   }
 
+  /* ── Summary ── */
+  #summary-bar {
+    flex: 0 0 auto;
+    display: none;
+    background: #fff;
+    border-bottom: 1px solid #dee2e6;
+    padding: 10px 16px;
+    gap: 8px;
+    flex-direction: column;
+    max-height: 180px;
+  }
+
+  #summary-bar.visible { display: flex; }
+
+  #summary-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #495057;
+    flex-shrink: 0;
+  }
+
+  #summary-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #dee2e6;
+    border-top-color: #0d6efd;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+
+  #summary-spinner.visible { display: block; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #summarize-btn {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid #0d6efd;
+    background: #0d6efd;
+    color: #fff;
+    cursor: pointer;
+  }
+  #summarize-btn:hover { background: #0b5ed7; border-color: #0b5ed7; }
+
+  #summary-text {
+    font-size: 13px;
+    color: #343a40;
+    line-height: 1.6;
+    overflow-y: auto;
+    flex: 1;
+  }
+  #summary-text p {
+    margin: 0 0 0.75em 0;
+  }
+  #summary-text p:last-child {
+    margin-bottom: 0;
+  }
+
   /* ── Transcript ── */
   #transcript-wrap { flex: 1 1 0; overflow-y: auto; padding: 16px; }
 
@@ -344,6 +407,16 @@
   <span class="legend-label">Speakers:</span>
 </div>
 
+<!-- ── Summary ── -->
+<div id="summary-bar">
+  <div id="summary-header">
+    <div id="summary-spinner"></div>
+    <span id="summary-label">Summary</span>
+    <button id="summarize-btn" onclick="triggerSummary()" style="display:none">Generate Summary</button>
+  </div>
+  <div id="summary-text"></div>
+</div>
+
 <!-- ── Transcript ── -->
 <div id="transcript-wrap">
   <div id="export-bar">
@@ -388,11 +461,13 @@
 
   // Show diarize row only if sherpa-onnx diarization models are present on the server
   let whisperModel = 'small';
+  let summarizeAvailable = false;
   (async () => {
     try {
       const cfg = await fetch('/config').then(r => r.json());
       if (cfg.sherpa_diarize_available) diarizeRow.classList.add('visible');
       if (cfg.available_models && cfg.available_models.length > 0) whisperModel = cfg.available_models[0];
+      summarizeAvailable = !!cfg.summarize_available;
     } catch (_) {}
   })();
   const statusText    = document.getElementById('status-text');
@@ -402,7 +477,12 @@
   const filenameLabel = document.getElementById('filename-label');
   const audio         = document.getElementById('audio');
   const rateSelect    = document.getElementById('rate-select');
-  const speakerLegend = document.getElementById('speaker-legend');
+  const speakerLegend  = document.getElementById('speaker-legend');
+  const summaryBar     = document.getElementById('summary-bar');
+  const summarySpinner = document.getElementById('summary-spinner');
+  const summaryLabel   = document.getElementById('summary-label');
+  const summaryText    = document.getElementById('summary-text');
+  const summarizeBtn   = document.getElementById('summarize-btn');
   const transcriptWrap = document.getElementById('transcript-wrap');
   const exportBar     = document.getElementById('export-bar');
   const transcriptDiv = document.getElementById('transcript');
@@ -434,6 +514,11 @@
     speakerColorMap.clear();
     speakerNameMap.clear();
     diarizeBtn.disabled = true;
+    summaryBar.classList.remove('visible');
+    summarySpinner.classList.remove('visible');
+    summaryText.textContent = '';
+    summaryLabel.textContent = 'Summary';
+    summarizeBtn.style.display = 'none';
   }
 
   // ── Drag & Drop ──
@@ -662,6 +747,9 @@
         if (data.diarize_status === 'done') {
           setStatus(`Speakers identified — ${data.speakers.length} speaker(s) found in ${Math.round(data.elapsed)}s`);
           applyDiarizationResults(data.segments, data.speakers);
+          if (summarizeAvailable) showSummarizeBtn();
+          handleSummaryState(data);
+          if (data.summary_status === 'running') pollSummary();
         }
       } catch (_) {}
     }, 2000);
@@ -805,6 +893,7 @@
           .forEach(el => { el.textContent = name; });
       });
 
+
       item.appendChild(swatch);
       item.appendChild(input);
       speakerLegend.appendChild(item);
@@ -812,6 +901,66 @@
 
     speakerLegend.classList.add('visible');
   }
+
+  // ── Summary ──
+  function showSummarizeBtn() {
+    summaryBar.classList.add('visible');
+    summarizeBtn.style.display = '';
+    summaryLabel.textContent = 'Summary';
+  }
+
+  async function triggerSummary() {
+    if (!jobId) return;
+    summarizeBtn.style.display = 'none';
+    summarySpinner.classList.add('visible');
+    summaryLabel.textContent = 'Summarizing…';
+    summaryText.innerHTML = '';
+    const speaker_names = Object.fromEntries(speakerNameMap);
+    try {
+      await fetch(`/summarize/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ speaker_names }),
+      });
+      pollSummary();
+    } catch (_) {
+      summaryLabel.textContent = 'Summary (failed)';
+      summarySpinner.classList.remove('visible');
+    }
+  }
+
+  function handleSummaryState(data) {
+    if (!data.summary_status || data.summary_status === 'idle') return;
+    summaryBar.classList.add('visible');
+    if (data.summary_status === 'running') {
+      summarySpinner.classList.add('visible');
+      summarizeBtn.style.display = 'none';
+      summaryLabel.textContent = 'Summarizing…';
+    } else if (data.summary_status === 'done') {
+      summarySpinner.classList.remove('visible');
+      summarizeBtn.style.display = 'none';
+      const secs = data.summary_elapsed != null ? ` (complete in ${Math.round(data.summary_elapsed)}s)` : '';
+      summaryLabel.textContent = `Summary${secs}`;
+      summaryText.innerHTML = (data.summary || '').split(/\n\n+/).filter(p => p.trim()).map(p => `<p>${p.trim()}</p>`).join('');
+    } else if (data.summary_status === 'error') {
+      summarySpinner.classList.remove('visible');
+      summarizeBtn.style.display = summarizeAvailable ? '' : 'none';
+      summaryLabel.textContent = 'Summary (failed)';
+      summaryText.textContent = data.summary_error || 'Summarization failed.';
+    }
+  }
+
+  function pollSummary() {
+    const timer = setInterval(async () => {
+      try {
+        const res  = await fetch(`/diarize-status/${jobId}`);
+        const data = await res.json();
+        handleSummaryState(data);
+        if (data.summary_status !== 'running') clearInterval(timer);
+      } catch (_) {}
+    }, 3000);
+  }
+
 
   // ── Audio sync ──
   audio.addEventListener('timeupdate', () => {
@@ -854,10 +1003,11 @@
     }));
 
     try {
+      const summary = fmt === 'txt' ? ([...summaryText.querySelectorAll('p')].map(p => p.textContent).join('\n\n').trim() || null) : null;
       const res = await fetch(`/export/${jobId}/${fmt}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segments }),
+        body: JSON.stringify({ segments, summary }),
       });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();

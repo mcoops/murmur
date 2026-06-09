@@ -18,10 +18,37 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+
+      - name: Cache models
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/cache@v4
+        with:
+          path: target/release/models
+          key: models-linux-ort1242-llama9553-qwen317b
+
+      - name: Download models
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./target/release/murmur --download-models
+
+      - name: Package release bundle
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p dist/murmur-linux
+          cp target/release/murmur dist/murmur-linux/
+          cp -r target/release/models dist/murmur-linux/
+          cd dist && zip -r murmur-linux-x86_64.zip murmur-linux/
+
       - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         with:
           name: murmur-linux
           path: target/release/murmur
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: murmur-linux
+          path: dist/murmur-linux-x86_64.zip
 
   build-windows:
     runs-on: windows-latest
@@ -57,10 +84,37 @@ jobs:
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/toolchain.cmake
 
+      - name: Cache models
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/cache@v4
+        with:
+          path: target/release/models
+          key: models-windows-ort1242-llama9553-qwen317b
+
+      - name: Download models
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: .\target\release\murmur.exe --download-models
+
+      - name: Package release bundle
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist\murmur-windows -Force
+          Copy-Item target\release\murmur.exe dist\murmur-windows\
+          Copy-Item -Recurse target\release\models dist\murmur-windows\models
+          Compress-Archive -Path dist\murmur-windows\* -DestinationPath dist\murmur-windows-x86_64.zip
+
       - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         with:
           name: murmur-windows
           path: target/release/murmur.exe
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: murmur-windows
+          path: dist/murmur-windows-x86_64.zip
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -70,19 +124,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: murmur-linux
-          path: artifacts/linux
+          path: artifacts/
       - uses: actions/download-artifact@v4
         with:
           name: murmur-windows
-          path: artifacts/windows
-      - name: Rename artifacts
-        run: |
-          mv artifacts/linux/murmur artifacts/murmur-linux-x86_64
-          mv artifacts/windows/murmur.exe artifacts/murmur-windows-x86_64.exe
-          chmod +x artifacts/murmur-linux-x86_64
+          path: artifacts/
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/murmur-linux-x86_64
-            artifacts/murmur-windows-x86_64.exe
+            artifacts/murmur-linux-x86_64.zip
+            artifacts/murmur-windows-x86_64.zip
           generate_release_notes: true

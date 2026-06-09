@@ -77,5 +77,16 @@ pub async fn diarize_status(
         resp["segments"] = serde_json::to_value(&j.segments).unwrap();
     }
 
+    resp["summary_status"] = serde_json::to_value(&j.summary_status).unwrap();
+    if let Some(ref text) = j.summary {
+        resp["summary"] = serde_json::Value::String(text.clone());
+    }
+    if let Some(ref err) = j.summary_error {
+        resp["summary_error"] = serde_json::Value::String(err.clone());
+    }
+    if let Some(t) = j.summary_start {
+        resp["summary_elapsed"] = ((t.elapsed().as_secs_f32() * 10.0).round() / 10.0).into();
+    }
+
     Ok(Json(resp))
 }

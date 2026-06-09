@@ -5,6 +5,7 @@ mod progress;
 mod diarize;
 mod export;
 mod status;
+mod summarize;
 
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
@@ -26,4 +27,5 @@ pub fn router() -> Router<AppState> {
         .route("/diarize-status/:job_id", get(diarize::diarize_status))
         .route("/export/:job_id/:fmt", post(export::export))
         .route("/status/:job_id", get(status::status))
+        .route("/summarize/:job_id", post(summarize::summarize))
 }

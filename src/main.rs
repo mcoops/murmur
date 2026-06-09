@@ -5,6 +5,7 @@ mod job;
 mod model_download;
 mod models;
 mod routes;
+mod summarize;
 mod transcribe;
 mod worker;
 
@@ -28,6 +29,7 @@ pub struct AppState {
     pub transcribe_semaphore: Arc<Semaphore>,
     pub model_cache: Arc<ModelCache>,
     pub models_dir: PathBuf,
+    pub summary_tokens: u32,
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -84,6 +86,10 @@ async fn run() -> anyhow::Result<()> {
     std::fs::create_dir_all(&models_dir)?;
     model_download::ensure_models(&models_dir).await?;
 
+    if std::env::args().nth(1).as_deref() == Some("--download-models") {
+        return Ok(());
+    }
+
     // Load ONNX Runtime dylib for pyannote segmentation (ort load-dynamic mode).
     let ort_dylib = model_download::ort_dylib_path(&models_dir);
     ort::init_from(&ort_dylib)?.commit();
@@ -92,11 +98,17 @@ async fn run() -> anyhow::Result<()> {
     // Transcription and diarization write NamedTempFiles to /tmp (tmpfs on Linux)
     // and delete them immediately after use.
 
+    let summary_tokens = std::env::var("SUMMARY_TOKENS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2048u32);
+
     let state = AppState {
         jobs: Arc::new(JobStore::new()),
         transcribe_semaphore: Arc::new(Semaphore::new(1)),
         model_cache: Arc::new(ModelCache::new()),
         models_dir,
+        summary_tokens,
     };
 
     let app = Router::new()

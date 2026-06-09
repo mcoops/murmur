@@ -138,12 +138,15 @@ pub async fn run_diarization(
                 }
             }
             tracing::info!(speakers = speakers.len(), "diarization done");
-            let mut j = job.lock().unwrap();
-            j.segments = updated;
-            j.diarize_speakers = speakers;
-            j.diarize_status = DiarizeStatus::Done;
-            j.diarize_stage = "Done".into();
-            j.diarize_progress = 1.0;
+
+            {
+                let mut j = job.lock().unwrap();
+                j.segments = updated;
+                j.diarize_speakers = speakers;
+                j.diarize_status = DiarizeStatus::Done;
+                j.diarize_stage = "Done".into();
+                j.diarize_progress = 1.0;
+            }
         }
         Ok(Err(e)) => {
             tracing::error!(error = %e, "diarization error");

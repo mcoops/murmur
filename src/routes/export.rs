@@ -10,6 +10,7 @@ use crate::AppState;
 #[derive(Deserialize)]
 pub struct ExportRequest {
     pub segments: Vec<Segment>,
+    pub summary:  Option<String>,
 }
 
 pub async fn export(
@@ -37,7 +38,7 @@ pub async fn export(
 
     let (content, media_type, filename) = match fmt.as_str() {
         "txt" => (
-            crate::export::to_txt(&req.segments),
+            crate::export::to_txt(&req.segments, req.summary.as_deref()),
             "text/plain; charset=utf-8",
             format!("{base_name}.txt"),
         ),

@@ -51,6 +51,16 @@ pub enum DiarizeStatus {
     Error,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryStatus {
+    #[default]
+    Idle,
+    Running,
+    Done,
+    Error,
+}
+
 // ── Job ───────────────────────────────────────────────────────────────────────
 
 pub struct Job {
@@ -73,6 +83,11 @@ pub struct Job {
     pub diarize_stage: String,
     pub diarize_progress: f32,
     pub diarize_start: Option<Instant>,
+
+    pub summary_status: SummaryStatus,
+    pub summary: Option<String>,
+    pub summary_error: Option<String>,
+    pub summary_start: Option<Instant>,
 }
 
 impl Job {
@@ -88,6 +103,10 @@ impl Job {
         self.diarize_stage.clear();
         self.diarize_progress = 0.0;
         self.diarize_start = None;
+        self.summary_status = SummaryStatus::Idle;
+        self.summary = None;
+        self.summary_error = None;
+        self.summary_start = None;
     }
 
     pub fn new(job_id: String, filename: String, model_name: String) -> Self {
@@ -108,6 +127,10 @@ impl Job {
             diarize_stage: String::new(),
             diarize_progress: 0.0,
             diarize_start: None,
+            summary_status: SummaryStatus::Idle,
+            summary: None,
+            summary_error: None,
+            summary_start: None,
         }
     }
 }

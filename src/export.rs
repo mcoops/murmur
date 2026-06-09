@@ -1,14 +1,20 @@
 use crate::job::Segment;
 
-pub fn to_txt(segments: &[Segment]) -> String {
+pub fn to_txt(segments: &[Segment], summary: Option<&str>) -> String {
+    let mut out = String::new();
+    if let Some(s) = summary {
+        if !s.is_empty() {
+            out.push_str("Summary\n=======\n\n");
+            out.push_str(s);
+            out.push_str("\n\n---\n\n");
+        }
+    }
+
     let has_speakers = segments.iter().any(|s| s.speaker.is_some());
 
     if !has_speakers {
-        return segments
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        out.push_str(&segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n\n"));
+        return out;
     }
 
     let mut lines: Vec<String> = Vec::new();
@@ -31,7 +37,8 @@ pub fn to_txt(segments: &[Segment]) -> String {
         lines.push(s.text.clone());
     }
 
-    lines.join("\n")
+    out.push_str(&lines.join("\n"));
+    out
 }
 
 pub fn to_srt(segments: &[Segment]) -> String {
@@ -90,7 +97,15 @@ mod tests {
     #[test]
     fn txt_no_speakers() {
         let segs = vec![seg(0, 0.0, 1.0, "Hello"), seg(1, 1.0, 2.0, "World")];
-        assert_eq!(to_txt(&segs), "Hello\n\nWorld");
+        assert_eq!(to_txt(&segs, None), "Hello\n\nWorld");
+    }
+
+    #[test]
+    fn txt_with_summary() {
+        let segs = vec![seg(0, 0.0, 1.0, "Hello")];
+        let out = to_txt(&segs, Some("A brief summary."));
+        assert!(out.starts_with("Summary\n=======\n\nA brief summary.\n\n---\n\n"));
+        assert!(out.ends_with("Hello"));
     }
 
     #[test]
@@ -100,7 +115,7 @@ mod tests {
             seg_spk(1, 1.0, 2.0, "there", "SPEAKER_00"),
             seg_spk(2, 2.0, 3.0, "Hello", "SPEAKER_01"),
         ];
-        let out = to_txt(&segs);
+        let out = to_txt(&segs, None);
         assert!(out.contains("SPEAKER_00:\nHi\nthere"));
         assert!(out.contains("SPEAKER_01:\nHello"));
     }
