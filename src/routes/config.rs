@@ -25,7 +25,7 @@ fn discover_models(models_dir: &std::path::Path) -> Vec<String> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let s = name.to_string_lossy();
-        if s.starts_with("ggml-") && s.ends_with(".bin") {
+        if s.starts_with("ggml-") && s.ends_with(".bin") && !s.contains("silero") {
             let model = s.trim_start_matches("ggml-").trim_end_matches(".bin").to_string();
             models.push(model);
         }

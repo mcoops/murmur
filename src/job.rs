@@ -30,6 +30,16 @@ pub enum SegmentEvent {
     Error { message: String },
 }
 
+// ── SSE events broadcast from summarization task ──────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SummaryEvent {
+    Token { text: String },
+    Done,
+    Error { message: String },
+}
+
 // ── Job status enums ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +98,7 @@ pub struct Job {
     pub summary: Option<String>,
     pub summary_error: Option<String>,
     pub summary_start: Option<Instant>,
+    pub summary_tx: broadcast::Sender<SummaryEvent>,
 }
 
 impl Job {
@@ -107,10 +118,13 @@ impl Job {
         self.summary = None;
         self.summary_error = None;
         self.summary_start = None;
+        let (summary_tx, _) = broadcast::channel(512);
+        self.summary_tx = summary_tx;
     }
 
     pub fn new(job_id: String, filename: String, model_name: String) -> Self {
         let (tx, _) = broadcast::channel(256);
+        let (summary_tx, _) = broadcast::channel(512);
         Self {
             job_id,
             audio_data: Vec::new(),
@@ -131,6 +145,7 @@ impl Job {
             summary: None,
             summary_error: None,
             summary_start: None,
+            summary_tx,
         }
     }
 }

@@ -1,36 +1,32 @@
 default: build
 
-# Debug build (both binaries)
+# Debug build
 build:
     cargo build
 
-# Release build (both binaries)
+# Release build
 release:
     cargo build --release
 
-# Run the server (release)
-run: release
-    ./target/release/whisper-app
+# Download all models/assets into target/release/models/ for local testing
+download-models: release
+    ./target/release/murmur --download-models
 
-# Run the server in debug mode
+# Run the server (release) — requires models to be present (run download-models first)
+run: release
+    ./target/release/murmur
+
+# Run in debug mode
 dev:
-    cargo build && ./target/debug/whisper-app
+    cargo build && ./target/debug/murmur
 
 # Lint
 check:
     cargo check && cargo clippy
 
-# Cross-compile for Windows using cargo-xwin (requires: apt install clang lld ninja-build)
-# NOTE: cross-compilation is blocked by a CRT mismatch — ort prebuilts use /MD (dynamic CRT)
-# while sherpa-onnx static prebuilts use /MT (static CRT). Build natively on Windows instead:
-#   cargo build --release
-# Or use GitHub Actions with a windows-latest runner.
-build-windows:
-    cargo xwin build --release --target x86_64-pc-windows-msvc
-
 # List downloaded models
 models:
-    ls -lh models/ 2>/dev/null || echo "No models yet — start the app to auto-download"
+    ls -lh target/release/models/ 2>/dev/null || echo "No models yet — run: just download-models"
 
 # Clean
 clean:

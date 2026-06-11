@@ -359,9 +359,88 @@
   }
 
   .text:focus { outline: 1px solid #0d6efd; border-radius: 2px; }
+
+  /* ── Login Overlay ── */
+  #login-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  #login-overlay.hidden { display: none; }
+  #login-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 36px 40px;
+    min-width: 320px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  #login-card h2 { font-size: 1.25em; font-weight: 700; color: #212529; text-align: center; margin: 0; }
+  #login-card p { font-size: 13px; color: #6c757d; text-align: center; margin: -10px 0 0; }
+  #login-form { display: flex; flex-direction: column; gap: 10px; }
+  #login-username, #login-password {
+    height: 40px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    padding: 0 12px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  #login-username:focus, #login-password:focus { outline: 2px solid #0d6efd; border-color: transparent; }
+  #login-submit {
+    height: 40px;
+    background: #0d6efd;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 4px;
+    width: 100%;
+  }
+  #login-submit:hover:not(:disabled) { background: #0b5ed7; }
+  #login-submit:disabled { background: #6c757d; cursor: not-allowed; }
+  #login-error { font-size: 12px; color: #dc3545; min-height: 16px; text-align: center; }
+
+  /* ── Logout button ── */
+  #logout-btn {
+    margin-left: auto;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    background: #fff;
+    color: #495057;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    cursor: pointer;
+    display: none;
+  }
+  #logout-btn:hover { background: #f1f3f5; }
 </style>
 </head>
 <body>
+
+<!-- ── Login Overlay ── -->
+<div id="login-overlay">
+  <div id="login-card">
+    <h2>Whisper Transcriber</h2>
+    <p>Sign in to continue</p>
+    <form id="login-form">
+      <input type="text" id="login-username" placeholder="Username" autocomplete="username" required>
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit" id="login-submit">Sign in</button>
+      <div id="login-error"></div>
+    </form>
+  </div>
+</div>
 
 <!-- ── Toolbar ── -->
 <div id="toolbar">
@@ -374,6 +453,7 @@
     </div>
 
     <button id="transcribe-btn" disabled>Transcribe</button>
+    <button id="logout-btn" onclick="doLogout()">Sign out</button>
   </div>
 
   <!-- Diarization row — shown only if sherpa-onnx models are present -->
@@ -462,14 +542,70 @@
   // Show diarize row only if sherpa-onnx diarization models are present on the server
   let whisperModel = 'small';
   let summarizeAvailable = false;
-  (async () => {
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const loginOverlay  = document.getElementById('login-overlay');
+  const loginForm     = document.getElementById('login-form');
+  const loginError    = document.getElementById('login-error');
+  const loginSubmit   = document.getElementById('login-submit');
+  const logoutBtn     = document.getElementById('logout-btn');
+
+  async function initApp() {
     try {
-      const cfg = await fetch('/config').then(r => r.json());
+      const cfg = await fetch('/config').then(r => r.ok ? r.json() : {});
       if (cfg.sherpa_diarize_available) diarizeRow.classList.add('visible');
       if (cfg.available_models && cfg.available_models.length > 0) whisperModel = cfg.available_models[0];
       summarizeAvailable = !!cfg.summarize_available;
     } catch (_) {}
+    logoutBtn.style.display = '';
+  }
+
+  (async () => {
+    try {
+      const res = await fetch('/auth/check');
+      if (res.ok) {
+        loginOverlay.classList.add('hidden');
+        await initApp();
+      }
+      // overlay stays visible if not authenticated
+    } catch (_) {}
   })();
+
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loginError.textContent = '';
+    loginSubmit.disabled = true;
+    try {
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('login-username').value,
+          password: document.getElementById('login-password').value,
+        }),
+      });
+      if (res.ok) {
+        loginOverlay.classList.add('hidden');
+        await initApp();
+      } else {
+        loginError.textContent = 'Invalid username or password.';
+        document.getElementById('login-password').value = '';
+        document.getElementById('login-password').focus();
+      }
+    } catch (_) {
+      loginError.textContent = 'Connection error. Please try again.';
+    }
+    loginSubmit.disabled = false;
+  });
+
+  async function doLogout() {
+    await fetch('/logout', { method: 'POST' });
+    logoutBtn.style.display = 'none';
+    loginOverlay.classList.remove('hidden');
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
+    loginError.textContent = '';
+  }
   const statusText    = document.getElementById('status-text');
   const progressWrap  = document.getElementById('progress-bar-wrap');
   const progressBar   = document.getElementById('progress-bar');

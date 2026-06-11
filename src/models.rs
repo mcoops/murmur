@@ -32,7 +32,10 @@ impl ModelCache {
                 );
             }
             tracing::info!(model = model_name, "loading whisper model");
-            let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
+            let mut wparams = WhisperContextParameters::default();
+            #[cfg(target_os = "windows")]
+            wparams.use_gpu(false);
+            let ctx = WhisperContext::new_with_params(path, wparams)
                 .map_err(|e| anyhow::anyhow!("failed to load model '{model_name}': {e:?}"))?;
             tracing::info!(model = model_name, "model loaded and cached");
             models.insert(model_name.to_string(), ctx);

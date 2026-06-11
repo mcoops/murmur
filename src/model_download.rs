@@ -4,8 +4,6 @@ use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 
 const ORT_VERSION: &str = "1.24.2";
-const LLAMA_BUILD: &str = "b9553";
-
 struct Model {
     filename: &'static str,
     url:      &'static str,
@@ -19,8 +17,13 @@ enum Kind {
 
 const MODELS: &[Model] = &[
     Model {
-        filename: "ggml-small-q8_0.bin",
+        filename: "ggml-small.bin",
         url:      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin",
+        kind:     Kind::Direct,
+    },
+    Model {
+        filename: "ggml-silero-vad.bin",
+        url:      "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
         kind:     Kind::Direct,
     },
     Model {
@@ -33,11 +36,6 @@ const MODELS: &[Model] = &[
         url:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx",
         kind:     Kind::Direct,
     },
-    Model {
-        filename: "Qwen3-1.7B-Q4_K_M.gguf",
-        url:      "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
-        kind:     Kind::Direct,
-    },
 ];
 
 pub fn ort_dylib_path(models_dir: &Path) -> PathBuf {
@@ -47,11 +45,12 @@ pub fn ort_dylib_path(models_dir: &Path) -> PathBuf {
     return models_dir.join("libonnxruntime.so");
 }
 
-pub fn llama_cli_path(models_dir: &Path) -> PathBuf {
+pub fn llamafile_path(models_dir: &Path) -> PathBuf {
+    // On Windows the APE binary must have a .exe extension to be executable directly.
     #[cfg(target_os = "windows")]
-    return models_dir.join("llama-cli.exe");
+    return models_dir.join("Qwen3.5-2B-Q8_0.exe");
     #[cfg(not(target_os = "windows"))]
-    return models_dir.join("llama-cli");
+    return models_dir.join("Qwen3.5-2B-Q8_0.llamafile");
 }
 
 enum Archive {
@@ -66,8 +65,6 @@ struct Download {
     url:     String,
     inner:   Option<String>,
     archive: Option<Archive>,
-    // When true, also extract all .so* files alongside the main binary (Linux only).
-    all_libs: bool,
 }
 
 pub async fn ensure_models(models_dir: &Path) -> anyhow::Result<()> {
@@ -77,10 +74,10 @@ pub async fn ensure_models(models_dir: &Path) -> anyhow::Result<()> {
         let dest = models_dir.join(m.filename);
         if dest.exists() { continue; }
         downloads.push(match &m.kind {
-            Kind::Direct => Download { dest, url: m.url.into(), inner: None, archive: None, all_libs: false },
+            Kind::Direct => Download { dest, url: m.url.into(), inner: None, archive: None },
             Kind::TarBz2 { inner } => Download {
                 dest, url: m.url.into(),
-                inner: Some(inner.to_string()), archive: Some(Archive::TarBz2), all_libs: false,
+                inner: Some(inner.to_string()), archive: Some(Archive::TarBz2),
             },
         });
     }
@@ -89,39 +86,33 @@ pub async fn ensure_models(models_dir: &Path) -> anyhow::Result<()> {
     if !dylib.exists() {
         #[cfg(target_os = "windows")]
         downloads.push(Download {
-            dest:     dylib,
-            url:      format!("https://github.com/microsoft/onnxruntime/releases/download/v{ORT_VERSION}/onnxruntime-win-x64-{ORT_VERSION}.zip"),
-            inner:    Some(format!("onnxruntime-win-x64-{ORT_VERSION}/lib/onnxruntime.dll")),
-            archive:  Some(Archive::Zip),
-            all_libs: false,
+            dest:    dylib,
+            url:     format!("https://github.com/microsoft/onnxruntime/releases/download/v{ORT_VERSION}/onnxruntime-win-x64-{ORT_VERSION}.zip"),
+            inner:   Some(format!("onnxruntime-win-x64-{ORT_VERSION}/lib/onnxruntime.dll")),
+            archive: Some(Archive::Zip),
         });
         #[cfg(not(target_os = "windows"))]
-        downloads.push(Download {
-            dest:     dylib,
-            url:      format!("https://github.com/microsoft/onnxruntime/releases/download/v{ORT_VERSION}/onnxruntime-linux-x64-{ORT_VERSION}.tgz"),
-            inner:    Some(format!("onnxruntime-linux-x64-{ORT_VERSION}/lib/libonnxruntime.so.{ORT_VERSION}")),
-            archive:  Some(Archive::TarGz),
-            all_libs: false,
-        });
+        {
+            let arch = match std::env::consts::ARCH {
+                "aarch64" => "linux-aarch64",
+                _         => "linux-x64",
+            };
+            downloads.push(Download {
+                dest:    dylib,
+                url:     format!("https://github.com/microsoft/onnxruntime/releases/download/v{ORT_VERSION}/onnxruntime-{arch}-{ORT_VERSION}.tgz"),
+                inner:   Some(format!("onnxruntime-{arch}-{ORT_VERSION}/lib/libonnxruntime.so.{ORT_VERSION}")),
+                archive: Some(Archive::TarGz),
+            });
+        }
     }
 
-    let llama_cli = llama_cli_path(models_dir);
-    if !llama_cli.exists() {
-        #[cfg(target_os = "windows")]
+    let llamafile = llamafile_path(models_dir);
+    if !llamafile.exists() {
         downloads.push(Download {
-            dest:     llama_cli,
-            url:      format!("https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/llama-{LLAMA_BUILD}-bin-win-cpu-x64.zip"),
-            inner:    Some("llama-cli.exe".into()),
-            archive:  Some(Archive::Zip),
-            all_libs: true,
-        });
-        #[cfg(not(target_os = "windows"))]
-        downloads.push(Download {
-            dest:     llama_cli,
-            url:      format!("https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/llama-{LLAMA_BUILD}-bin-ubuntu-x64.tar.gz"),
-            inner:    Some("llama-cli".into()),
-            archive:  Some(Archive::TarGz),
-            all_libs: true,
+            dest:    llamafile,
+            url:     "https://huggingface.co/mozilla-ai/llamafile_0.10/resolve/main/Qwen3.5-2B-Q8_0.llamafile".into(),
+            inner:   None,
+            archive: None,
         });
     }
 
@@ -154,22 +145,14 @@ pub async fn ensure_models(models_dir: &Path) -> anyhow::Result<()> {
             (Some(Archive::TarGz), Some(inner)) => {
                 let tmp = models_dir.join("_dl.tar.gz");
                 stream_to_file(&client, &dl.url, &tmp).await?;
-                if dl.all_libs {
-                    extract_tar_with_libs(&tmp, inner, models_dir, true)?;
-                } else {
-                    extract_tar(&tmp, inner, &dl.dest, true)?;
-                }
+                extract_tar(&tmp, inner, &dl.dest, true)?;
                 std::fs::remove_file(&tmp)?;
             }
             #[cfg(target_os = "windows")]
             (Some(Archive::Zip), Some(inner)) => {
                 let tmp = models_dir.join("_dl.zip");
                 stream_to_file(&client, &dl.url, &tmp).await?;
-                if dl.all_libs {
-                    extract_zip_with_libs(&tmp, inner, models_dir)?;
-                } else {
-                    extract_zip(&tmp, inner, &dl.dest)?;
-                }
+                extract_zip(&tmp, inner, &dl.dest)?;
                 std::fs::remove_file(&tmp)?;
             }
             _ => anyhow::bail!("invalid download config"),
@@ -177,13 +160,12 @@ pub async fn ensure_models(models_dir: &Path) -> anyhow::Result<()> {
         println!("   done");
     }
 
-    // Ensure llama-cli is executable on Unix.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let cli = llama_cli_path(models_dir);
-        if cli.exists() {
-            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755))?;
+        let llamafile = llamafile_path(models_dir);
+        if llamafile.exists() {
+            std::fs::set_permissions(&llamafile, std::fs::Permissions::from_mode(0o755))?;
         }
     }
 
@@ -232,46 +214,6 @@ fn extract_tar(archive: &Path, inner_path: &str, dest: &Path, gzip: bool) -> any
     }
 }
 
-/// Extracts `binary_name` into `dest_dir`, and also extracts every `.so*` file
-/// found in the archive alongside it. Used for llama-cli which ships companion libs.
-fn extract_tar_with_libs(archive: &Path, binary_name: &str, dest_dir: &Path, gzip: bool) -> anyhow::Result<()> {
-    let inner_name = Path::new(binary_name).file_name()
-        .and_then(|n| n.to_str()).unwrap_or(binary_name);
-    let file = std::fs::File::open(archive)?;
-    let mut found = false;
-
-    macro_rules! scan {
-        ($tar:expr) => {{
-            for entry in $tar.entries()? {
-                let mut entry = entry?;
-                let path = entry.path()?;
-                let name = match path.file_name().and_then(|n| n.to_str()) {
-                    Some(n) => n.to_string(),
-                    None    => continue,
-                };
-                if name == inner_name {
-                    entry.unpack(dest_dir.join(&name))?;
-                    found = true;
-                } else if name.contains(".so") {
-                    entry.unpack(dest_dir.join(&name))?;
-                }
-            }
-        }};
-    }
-
-    if gzip {
-        let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
-        scan!(tar);
-    } else {
-        let mut tar = tar::Archive::new(bzip2::read::BzDecoder::new(file));
-        scan!(tar);
-    }
-
-    if !found {
-        anyhow::bail!("'{inner_name}' not found in archive");
-    }
-    Ok(())
-}
 
 fn find_and_unpack<R: std::io::Read>(
     tar: &mut tar::Archive<R>,
@@ -305,35 +247,6 @@ fn extract_zip(archive: &Path, inner_path: &str, dest: &Path) -> anyhow::Result<
     anyhow::bail!("'{inner_name}' not found in zip")
 }
 
-/// Extracts `binary_name` into `dest_dir` and also extracts every `.dll` alongside it.
-#[cfg(target_os = "windows")]
-fn extract_zip_with_libs(archive: &Path, binary_name: &str, dest_dir: &Path) -> anyhow::Result<()> {
-    let inner_name = Path::new(binary_name).file_name()
-        .and_then(|n| n.to_str()).unwrap_or(binary_name);
-    let file = std::fs::File::open(archive)?;
-    let mut zip = zip::ZipArchive::new(file)?;
-    let mut found = false;
-    for i in 0..zip.len() {
-        let mut entry = zip.by_index(i)?;
-        let name = entry.name().to_string();
-        let filename = Path::new(&name).file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        if filename == inner_name {
-            let mut out = std::fs::File::create(dest_dir.join(&filename))?;
-            std::io::copy(&mut entry, &mut out)?;
-            found = true;
-        } else if filename.ends_with(".dll") {
-            let mut out = std::fs::File::create(dest_dir.join(&filename))?;
-            std::io::copy(&mut entry, &mut out)?;
-        }
-    }
-    if !found {
-        anyhow::bail!("'{inner_name}' not found in zip");
-    }
-    Ok(())
-}
 
 fn print_progress(downloaded: u64, total: u64) {
     const WIDTH: usize = 40;

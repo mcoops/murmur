@@ -1,7 +1,9 @@
 mod audio;
+mod auth;
 mod diarize;
 mod export;
 mod job;
+mod llama_server;
 mod model_download;
 mod models;
 mod routes;
@@ -12,7 +14,6 @@ mod worker;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
 use tokio::sync::Semaphore;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
@@ -30,6 +31,11 @@ pub struct AppState {
     pub model_cache: Arc<ModelCache>,
     pub models_dir: PathBuf,
     pub summary_tokens: u32,
+    /// Port of the persistent llamafile server process (None if unavailable).
+    pub llama_port:  Option<u16>,
+    pub llama_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub http_client: reqwest::Client,
+    pub auth: auth::AuthConfig,
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -84,14 +90,21 @@ async fn run() -> anyhow::Result<()> {
         .join("models");
 
     std::fs::create_dir_all(&models_dir)?;
-    model_download::ensure_models(&models_dir).await?;
 
     if std::env::args().nth(1).as_deref() == Some("--download-models") {
+        model_download::ensure_models(&models_dir).await?;
         return Ok(());
     }
 
     // Load ONNX Runtime dylib for pyannote segmentation (ort load-dynamic mode).
     let ort_dylib = model_download::ort_dylib_path(&models_dir);
+    if !ort_dylib.exists() {
+        anyhow::bail!(
+            "Models not found at {}.\n\
+             Run:  murmur --download-models",
+            models_dir.display()
+        );
+    }
     ort::init_from(&ort_dylib)?.commit();
 
     // Audio is stored in memory on each Job — nothing uploaded ever touches disk.
@@ -103,21 +116,59 @@ async fn run() -> anyhow::Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(2048u32);
 
+    // Spawn the llamafile server once at startup so the model stays loaded.
+    // `_llama_server` is kept alive until `run()` returns (program exit).
+    let (_llama_server, llama_port, llama_alive) = if summarize::available(&models_dir) {
+        match llama_server::LlamaServer::spawn(&models_dir) {
+            Ok(srv) => {
+                let port  = srv.port;
+                let alive = srv.alive.clone();
+                (Some(srv), Some(port), Some(alive))
+            }
+            Err(e) => {
+                tracing::warn!("could not start llamafile server: {e}");
+                (None, None, None)
+            }
+        }
+    } else {
+        (None, None, None)
+    };
+
+    let username = std::env::var("MURMUR_USERNAME").unwrap_or_else(|_| "admin".to_string());
+    let password = std::env::var("MURMUR_PASSWORD").unwrap_or_else(|_| {
+        let generated = uuid::Uuid::new_v4().to_string()[..12].to_string();
+        tracing::warn!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        tracing::warn!(" No MURMUR_PASSWORD set — generated password: {generated}");
+        tracing::warn!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        generated
+    });
+
     let state = AppState {
         jobs: Arc::new(JobStore::new()),
         transcribe_semaphore: Arc::new(Semaphore::new(1)),
         model_cache: Arc::new(ModelCache::new()),
         models_dir,
         summary_tokens,
+        llama_port,
+        llama_alive,
+        http_client: reqwest::Client::new(),
+        auth: auth::AuthConfig::new(username, password),
     };
 
-    let app = Router::new()
-        .merge(routes::router())
+    let app = routes::router(state.clone())
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await?;
-    tracing::info!("listening on http://127.0.0.1:8000");
+    let listener = match tokio::net::TcpListener::bind("0.0.0.0:8000").await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            tracing::info!("port 8000 already in use — opening browser to existing instance");
+            let _ = open::that("http://localhost:8000");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
+    tracing::info!("listening on http://0.0.0.0:8000");
     let _ = open::that("http://localhost:8000");
     axum::serve(listener, app).await?;
     Ok(())
