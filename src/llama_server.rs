@@ -41,6 +41,20 @@ impl LlamaServer {
             cmd.creation_flags(0x0800_0000);
         }
 
+        // Cosmopolitan's dlopen doesn't use ldconfig — it only searches LD_LIBRARY_PATH.
+        // Prepend the standard CUDA/NVIDIA library directories so llamafile finds
+        // libcuda.so.1 in Docker containers where LD_LIBRARY_PATH is otherwise empty.
+        #[cfg(target_os = "linux")]
+        {
+            let arch = std::env::consts::ARCH; // "x86_64" or "aarch64"
+            let extra = format!(
+                "/usr/local/cuda/lib64:/usr/local/nvidia/lib64:/lib/{arch}-linux-gnu:/usr/lib/{arch}-linux-gnu"
+            );
+            let existing = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+            let val = if existing.is_empty() { extra } else { format!("{extra}:{existing}") };
+            cmd.env("LD_LIBRARY_PATH", val);
+        }
+
         let child = cmd
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

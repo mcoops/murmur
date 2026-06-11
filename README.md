@@ -111,6 +111,72 @@ Models are downloaded to a `models\` directory next to the binary on first run.
 
 ---
 
+## Container
+
+Pre-built images are published to `ghcr.io/mcoops/whisper-rs` for `linux/amd64` and `linux/arm64`.
+
+### CPU / Vulkan (default)
+
+Whisper transcription can use any Vulkan-capable GPU (NVIDIA, AMD, Intel) when the host driver is visible inside the container. No special build flag is needed.
+
+```bash
+docker build -t murmur .
+
+docker run -d \
+  --name murmur \
+  -v murmur-models:/app/models \
+  -p 8000:8000 \
+  -e MURMUR_PASSWORD=changeme \
+  murmur
+```
+
+### NVIDIA GPU (llamafile CUDA)
+
+The LLM summarisation backend (llamafile) supports CUDA on NVIDIA hardware. Because llamafile JIT-compiles its CUDA kernels at first startup using `nvcc`, the runtime image must include the full CUDA devel toolchain:
+
+```bash
+docker build \
+  --build-arg RUNTIME=nvidia/cuda:12.6.3-devel-ubuntu24.04 \
+  -t murmur-nvidia .
+```
+
+Run with the NVIDIA container toolkit (CDI mode requires toolkit ≥ 1.14):
+
+```bash
+# CDI mode (recommended)
+docker run -d \
+  --name murmur \
+  --device nvidia.com/gpu=0 \
+  -v murmur-models:/app/models \
+  -p 8000:8000 \
+  -e MURMUR_PASSWORD=changeme \
+  murmur-nvidia
+
+# Legacy runtime mode
+docker run -d \
+  --name murmur \
+  --gpus all \
+  -v murmur-models:/app/models \
+  -p 8000:8000 \
+  -e MURMUR_PASSWORD=changeme \
+  murmur-nvidia
+```
+
+On first start llamafile compiles `ggml-cuda.so` — this takes a few minutes. Subsequent starts load the cached library from the models volume.
+
+> **Note:** llamafile requires CUDA compute capability ≥ 7.5 (Turing, RTX 20xx / Quadro RTX / Tesla T4 and newer). Older NVIDIA cards (Pascal / GTX 10xx) fall back to CPU.
+
+### Authentication
+
+The web UI and all API endpoints require a username and password:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MURMUR_USERNAME` | `admin` | |
+| `MURMUR_PASSWORD` | *(random)* | Printed to stdout on first start if not set |
+
+---
+
 ## Notes
 
 - Only one transcription runs at a time. A second request while one is in progress returns HTTP 429.

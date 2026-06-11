@@ -22,10 +22,20 @@ COPY . .
 RUN cargo build --release
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-FROM ubuntu:24.04
+# Default: CPU inference + Vulkan GPU (whisper.cpp) via host driver injection.
+#
+# NVIDIA GPU (llamafile CUDA):
+#   docker build --build-arg RUNTIME=nvidia/cuda:12.6.3-devel-ubuntu24.04 .
+#
+# llamafile JIT-compiles ggml-cuda.so at first start using nvcc; the devel
+# image ships nvcc + CUDA headers. Without them CUDA silently falls back to CPU.
+# build-essential is included in both variants so nvcc can link its output.
+ARG RUNTIME=ubuntu:24.04
+FROM ${RUNTIME}
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
         libvulkan1 \
         libgomp1 \
         ca-certificates \
