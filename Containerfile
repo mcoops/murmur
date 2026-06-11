@@ -22,8 +22,9 @@ COPY . .
 RUN cargo build --release
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libvulkan1 \
         libgomp1 \
