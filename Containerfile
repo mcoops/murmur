@@ -1,11 +1,21 @@
 # ── Build ─────────────────────────────────────────────────────────────────────
-FROM rust:1-bookworm AS builder
+# Ubuntu 24.04 ships Vulkan SDK 1.3.275 — new enough for whisper.cpp's use of
+# vk::LayerSettingEXT (added in 1.3.261). Debian Bookworm only has 1.3.239.
+FROM ubuntu:24.04 AS builder
 
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+        build-essential \
         cmake \
+        clang \
         libvulkan-dev \
         glslc \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH="/root/.cargo/bin:$PATH"
 
 WORKDIR /build
 COPY . .
